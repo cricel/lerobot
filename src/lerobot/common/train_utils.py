@@ -13,6 +13,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import shutil
 from pathlib import Path
 
 from torch.optim import Optimizer
@@ -58,12 +59,27 @@ def load_training_step(save_dir: Path) -> int:
     return training_step["step"]
 
 
-def update_last_checkpoint(checkpoint_dir: Path) -> Path:
-    last_checkpoint_dir = checkpoint_dir.parent / LAST_CHECKPOINT_LINK
+def _remove_last_checkpoint_link(last_checkpoint_dir: Path) -> None:
+    if not last_checkpoint_dir.exists() and not last_checkpoint_dir.is_symlink():
+        return
     if last_checkpoint_dir.is_symlink():
         last_checkpoint_dir.unlink()
+    elif last_checkpoint_dir.is_dir():
+        shutil.rmtree(last_checkpoint_dir)
+    else:
+        last_checkpoint_dir.unlink()
+
+
+def update_last_checkpoint(checkpoint_dir: Path) -> Path:
+    last_checkpoint_dir = checkpoint_dir.parent / LAST_CHECKPOINT_LINK
     relative_target = checkpoint_dir.relative_to(checkpoint_dir.parent)
-    last_checkpoint_dir.symlink_to(relative_target)
+    _remove_last_checkpoint_link(last_checkpoint_dir)
+    try:
+        last_checkpoint_dir.symlink_to(relative_target)
+    except OSError:
+        # Windows often blocks symlinks without Developer Mode or admin (WinError 1314).
+        shutil.copytree(checkpoint_dir, last_checkpoint_dir)
+    return last_checkpoint_dir
 
 
 def save_checkpoint(

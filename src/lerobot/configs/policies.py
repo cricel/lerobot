@@ -37,6 +37,15 @@ T = TypeVar("T", bound="PreTrainedConfig")
 logger = getLogger(__name__)
 
 
+def _path_string_looks_like_local_filesystem(model_id: str) -> bool:
+    """True if ``model_id`` is very unlikely to be a Hugging Face repo id (``user/repo``)."""
+    if not model_id or model_id.startswith(("/", "~", ".")) or "\\" in model_id:
+        return True
+    if os.name == "nt" and len(model_id) >= 2 and model_id[1] == ":":
+        return True
+    return model_id.replace("\\", "/").count("/") > 1
+
+
 @dataclass
 class PreTrainedConfig(draccus.ChoiceRegistry, HubMixin, abc.ABC):  # type: ignore[misc,name-defined] #TODO: draccus issue
     """
@@ -180,11 +189,18 @@ class PreTrainedConfig(draccus.ChoiceRegistry, HubMixin, abc.ABC):  # type: igno
     ) -> T:
         model_id = str(pretrained_name_or_path)
         config_file: str | None = None
-        if Path(model_id).is_dir():
-            if CONFIG_NAME in os.listdir(model_id):
-                config_file = os.path.join(model_id, CONFIG_NAME)
+        model_path = Path(model_id).expanduser()
+        if model_path.is_dir():
+            if CONFIG_NAME in os.listdir(model_path):
+                config_file = str(model_path / CONFIG_NAME)
             else:
-                logger.error(f"{CONFIG_NAME} not found in {Path(model_id).resolve()}")
+                logger.error(f"{CONFIG_NAME} not found in {model_path.resolve()}")
+        elif _path_string_looks_like_local_filesystem(model_id):
+            raise FileNotFoundError(
+                f"Policy path is not an existing directory: {model_path.resolve()}. "
+                f"Expected a folder containing {CONFIG_NAME} (e.g. .../checkpoints/020000/pretrained_model "
+                f"or .../checkpoints/last/pretrained_model)."
+            )
         else:
             try:
                 config_file = hf_hub_download(
